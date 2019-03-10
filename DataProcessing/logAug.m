@@ -1,7 +1,10 @@
-function [superSet] = logAug(X,window,stride, n)
+function [superSet, swin] = logAug(X,window,stride, n, Hdrs)
 %LOGAUG Well log Augmentation
 %   Extracts subsets of shape (window, nLogs) from the given 3d matrix of
 %   logs X.
+%   Rows containing at lease one Nan from the start or end of the well will
+%   be removed. Nans within the well will be interpolated linearly from
+%   surrounding values.
 %   
 %   INPUTS:
 %       X      = of shape (A, B, C) where A is the number of steps (log
@@ -17,6 +20,7 @@ function [superSet] = logAug(X,window,stride, n)
 %       SUPERSET = Matrix containing subsets of all logs 
 %       of shape ( window * No. of iterations, nLogs)
 % Written by: Obai Shaikh
+
 if nargin < 4
     n = 1e4;
 end
@@ -31,19 +35,43 @@ for i = 1:dim
     
     log = X(:,:,i);
     
-    % Trim zeros and nans:
-    [top_cut,bottom_cut, ~] = getLimits(log);
+    % Trim zeros and nans from top and bottom of well:
+    [top_cut,bottom_cut, th, th_new] = getLimits(log);
     log = log(top_cut:bottom_cut-1,:);
     lo_cut = lonanFix(log);
     log = log(1:lo_cut,:);
     
-    % remove rows with interwell nans:
-    log(any(isnan(log), 2), :) = [];
+    disp(['No. of points:  ',num2str(th_new), '      New Thickness:  ',...
+        num2str(th_new.*0.15)])
+
+%     disp(['Top trim: ', num2str(top_cut), '   Bottom trim: ', ...
+%         num2str(bottom_cut)])
+%     disp(['Low nan cut: ', num2str(lo_cut)])
     
+    %linear interp. inter-well nans in each column
+    for j=2:nLogs     
+        x = log(:,j);
+        nanx = isnan(x);
+        t    = 1:numel(x);
+        x(nanx) = interp1(t(~nanx), x(~nanx), t(nanx));
+        log(:,j) = x;
+    end
+
+    % Apply Low-pass filter:
+%     p = 100;
+%     lo_pass = ones(1, p)/p;
+%     log = filter(lo_pass, 1, log);
+    [log, swin] = smoothdata(log,1, 'sgolay',32);
+    
+    if mod(i,2)==0
+        figure;lplot(log,Hdrs);title(['Well: ', num2str(i)]);
+    end
     % Standardize:
-    mu = mean(log,1);
-    sigma = std(log,1) + .0001;
-    log = (log - mu +.0001)./sigma;
+%     mu = mean(log,1);
+%     sigma = std(log,1) + .0001;
+%     log = (log - mu +.0001)./sigma;
+%     mu_rho(i) = mu(end-1);
+%     std_rho(i) = sigma(end-1);
     
     % Compute # of iterations for each log:
     th = length(log);
